@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { motion } from "framer-motion";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 
 export default function Home() {
   const [selectedDevice, setSelectedDevice] = useState<string>("");
@@ -11,7 +11,26 @@ export default function Home() {
   const [isPolling, setIsPolling] = useState<boolean>(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Turn on the
+  // Get the list of available video input devices (webcams) and set the default device as default
+  useEffect(() => {
+    const getDevices = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(
+          (device) => device.kind === "videoinput"
+        );
+        setDevices(videoDevices);
+        if (videoDevices.length > 0) {
+          setSelectedDevice(videoDevices[0].deviceId);
+        }
+      } catch (error) {
+        console.error("Error accessing media devices:", error);
+      }
+    };
+    getDevices();
+  }, []);
+
+  // Turn on the webcam
   const startPredict = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
