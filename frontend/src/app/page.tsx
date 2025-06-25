@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { motion } from "framer-motion";
 import { useState, useRef, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 export default function Home() {
   const [selectedDevice, setSelectedDevice] = useState<string>("");
@@ -29,6 +30,77 @@ export default function Home() {
     };
     getDevices();
   }, []);
+
+  // Capture video frame and convert to Image
+  const captureFrame = async (
+    videoElement: HTMLVideoElement
+  ): Promise<Blob | null> => {
+    try {
+      if (!videoElement.videoWidth || !videoElement.videoHeight) {
+        console.log("Video element not ready");
+        return null;
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = videoElement.videoWidth;
+      canvas.height = videoElement.videoHeight;
+      const context = canvas.getContext("2d");
+      if (!context) return null;
+
+      context.drawImage(videoElement, 0, 0);
+
+      return new Promise((resolve) => {
+        canvas.toBlob((blob) => {
+          resolve(blob || null);
+        }, "image/jpeg");
+      });
+    } catch (error) {
+      console.error("Error capturing frame:", error);
+      return null;
+    }
+  };
+
+  // Send the captured frame to the server for processing
+  const sendFrameToServer = async () => {
+    try {
+      if (!videoRef.current || !isStreaming) {
+        console.log("Video element not ready or not streaming");
+        return null;
+      }
+
+      const blob = await captureFrame(videoRef.current);
+      if (!blob) {
+        console.log("No frame captured");
+        return null;
+      }
+
+      const formData = new FormData();
+      formData.append("image", blob, "frame.jpg");
+
+      console.log("Sending frame to server...");
+
+      const response = await fetch("https://localhost:8000/predict_fire", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+      console.log("server response:", data);
+      return data;
+    } catch (error) {
+      console.error("Error sending frame to server:", error);
+      return null;
+    }
+  };
+
+  // Poll the server for predictions at regular intervals by using Tanstack Query
+  const { data: predictionData, refetch } = useQuery({
+    queryKey: ["firePrediction"],
+    queryFn: sendFrameToServer,
+    enabled: isPolling && isStreaming, // Only poll when streaming and polling is active
+    refetchInterval: 5000, // Poll every 5 seconds
+    retry: false, // Disable automatic retries
+  });
 
   // Turn on the webcam
   const startPredict = async () => {
