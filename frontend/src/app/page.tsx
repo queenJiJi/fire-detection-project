@@ -79,7 +79,7 @@ export default function Home() {
 
       console.log("Sending frame to server...");
 
-      const response = await fetch("https://localhost:8000/predict_fire", {
+      const response = await fetch("http://localhost:8000/predict_fire", {
         method: "POST",
         body: formData,
       });
