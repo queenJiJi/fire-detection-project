@@ -1,23 +1,21 @@
 "use client";
-
-import Image from "next/image";
-import { motion } from "framer-motion";
 import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { motion } from "framer-motion";
 
 export default function Home() {
-  const [selectedDevice, setSelectedDevice] = useState<string>("");
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
-  const [isStreaming, setIsStreaming] = useState<boolean>(false);
-  const [isPolling, setIsPolling] = useState<boolean>(false);
+  const [selectedDevice, setSelectedDevice] = useState<string>("");
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [isPolling, setIsPolling] = useState(false);
 
-  const [audioPermission, setAudioPermission] = useState<boolean>(false);
+  const [audioPermission, setAudioPermission] = useState(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const sourceNodeRef = useRef<OscillatorNode | null>(null);
 
-  // Get the list of available video input devices (webcams) and set the default device as default
+  // get camera devices
   useEffect(() => {
     const getDevices = async () => {
       try {
@@ -30,29 +28,30 @@ export default function Home() {
           setSelectedDevice(videoDevices[0].deviceId);
         }
       } catch (error) {
-        console.error("Error accessing media devices:", error);
+        console.error("failed to get camera devices:", error);
       }
     };
     getDevices();
   }, []);
 
-  // Capture video frame and convert to Image
+  // capture video frame and convert to Blob
   const captureFrame = async (
     videoElement: HTMLVideoElement
   ): Promise<Blob | null> => {
     try {
       if (!videoElement.videoWidth || !videoElement.videoHeight) {
-        console.log("Video element not ready");
+        console.log("video size is invalid");
         return null;
       }
 
       const canvas = document.createElement("canvas");
       canvas.width = videoElement.videoWidth;
       canvas.height = videoElement.videoHeight;
-      const context = canvas.getContext("2d");
-      if (!context) return null;
 
-      context.drawImage(videoElement, 0, 0);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+
+      ctx.drawImage(videoElement, 0, 0);
 
       return new Promise((resolve) => {
         canvas.toBlob((blob) => {
@@ -60,30 +59,29 @@ export default function Home() {
         }, "image/jpeg");
       });
     } catch (error) {
-      console.error("Error capturing frame:", error);
+      console.error("frame capture error:", error);
       return null;
     }
   };
 
-  // Send the captured frame to the server for processing
+  // send image to server
   const sendFrameToServer = async () => {
     try {
       if (!videoRef.current || !isStreaming) {
-        console.log("Video element not ready or not streaming");
+        console.log("video is not playing");
         return null;
       }
 
       const blob = await captureFrame(videoRef.current);
       if (!blob) {
-        console.log("No frame captured");
+        console.log("frame capture failed");
         return null;
       }
 
       const formData = new FormData();
-      formData.append("image", blob, "frame.jpg");
+      formData.append("file", blob, "frame.jpg");
 
-      console.log("Sending frame to server...");
-
+      console.log("sending request to server...");
       const response = await fetch("http://localhost:8000/predict_fire", {
         method: "POST",
         body: formData,
@@ -93,26 +91,25 @@ export default function Home() {
       console.log("server response:", data);
       return data;
     } catch (error) {
-      console.error("Error sending frame to server:", error);
+      console.error("server request error:", error);
       return null;
     }
   };
 
-  // Poll the server for predictions at regular intervals by using Tanstack Query
-  const { data: predictionData, refetch } = useQuery({
-    queryKey: ["firePrediction"],
+  // polling with TanStack Query
+  const { data: predictionData } = useQuery({
+    queryKey: ["fireDetection"],
     queryFn: sendFrameToServer,
-    enabled: isPolling && isStreaming, // Only poll when streaming and polling is active
-    refetchInterval: 5000, // Poll every 5 seconds
-    retry: false, // Disable automatic retries
+    enabled: isPolling && isStreaming,
+    refetchInterval: 5000,
+    retry: false,
   });
 
-  // Initialize audio context and request permission
   const initAudioContext = async () => {
     try {
       if (!audioPermission) {
         const userConsent = window.confirm(
-          "This application requires access to your audio system for alert sounds. Do you allow this?"
+          "fire alarm requires audio permission. allow?"
         );
         if (!userConsent) {
           return false;
@@ -250,44 +247,42 @@ export default function Home() {
     }
   }, [predictionData]);
 
-  // Turn on the webcam
   const startPredict = async () => {
     try {
       const audioInitialized = await initAudioContext();
       if (!audioInitialized) {
-        console.log("Audio context initialization failed");
+        console.log("audio permission denied");
         return;
       }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { deviceId: selectedDevice },
       });
 
       if (videoRef.current) {
-        const videoElement = videoRef.current;
-        videoElement.srcObject = stream;
-        await videoElement.play();
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
         setIsStreaming(true);
         setIsPolling(true);
-        console.log("Streaming started");
+        console.log("streaming started");
       }
     } catch (error) {
       console.error("camera access error:", error);
     }
   };
 
-  // Turn off the webcam
   const stopPredict = () => {
     stopAlertSound();
     if (videoRef.current && videoRef.current.srcObject) {
-      // 비디오요소가 존재하고, 웹캠이 실행중인지
       const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
       tracks.forEach((track) => track.stop());
       videoRef.current.srcObject = null;
       setIsStreaming(false);
-      setIsPolling(false);
-      console.log("Streaming stopped");
+      setIsPolling(false); // stop polling
     }
   };
+
+  console.log("fire detection result:", predictionData);
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gray-900 text-white">
