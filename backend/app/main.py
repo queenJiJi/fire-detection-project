@@ -19,7 +19,7 @@ from app.db.models import (
     detection_log as detection_log_model,
 )
 
-from fastapi.staticfiles import StaticFiles
+from fastapi.staticfiles import StaticFiles # serve static files
 
 
 def init_db():

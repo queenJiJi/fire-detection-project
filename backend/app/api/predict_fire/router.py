@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from datetime import datetime
 from ultralytics import YOLO
+from pathlib import Path
 import logging
 import shutil
 import os
@@ -70,8 +71,8 @@ async def predict_fire(
 
     # load model
     try:
-        # model = YOLO("assets/best.pt")  # relative path
-        model = YOLO("app/assets/best.pt")
+        MODEL_PATH = Path(__file__).resolve().parent.parent.parent / "assets" / "best.pt"
+        model = YOLO(str(MODEL_PATH))
         logger.info("model loaded successfully.")
     except Exception as e:
         logger.error(f"error occurred while loading model: {str(e)}")
