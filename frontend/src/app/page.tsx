@@ -12,6 +12,11 @@ export default function Home() {
   const [isPolling, setIsPolling] = useState<boolean>(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  const [audioPermission, setAudioPermission] = useState<boolean>(false);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const sourceNodeRef = useRef<OscillatorNode | null>(null);
+
   // Get the list of available video input devices (webcams) and set the default device as default
   useEffect(() => {
     const getDevices = async () => {
@@ -102,9 +107,157 @@ export default function Home() {
     retry: false, // Disable automatic retries
   });
 
+  // Initialize audio context and request permission
+  const initAudioContext = async () => {
+    try {
+      if (!audioPermission) {
+        const userConsent = window.confirm(
+          "fire alarm requires audio permission. allow?"
+        );
+        if (!userConsent) {
+          return false;
+        }
+
+        const AudioContext =
+          window.AudioContext || (window as any).webkitAudioContext;
+        audioContextRef.current = new AudioContext();
+
+        // iOS Safari for processing
+        if (audioContextRef.current.state === "suspended") {
+          await audioContextRef.current.resume();
+        }
+
+        setAudioPermission(true);
+        return true;
+      }
+      return true;
+    } catch (error) {
+      console.error("audio initialization error:", error);
+      alert("audio initialization failed.");
+      return false;
+    }
+  };
+
+  // stop alert sound
+  const stopAlertSound = () => {
+    if (sourceNodeRef.current) {
+      sourceNodeRef.current.stop();
+      sourceNodeRef.current.disconnect();
+    }
+    if (gainNodeRef.current) {
+      gainNodeRef.current.disconnect();
+    }
+  };
+
+  // alert sound generation and playback
+  const playAlertSound = () => {
+    if (!audioContextRef.current) return;
+    stopAlertSound();
+
+    const oscillator = audioContextRef.current.createOscillator();
+    gainNodeRef.current = audioContextRef.current.createGain();
+
+    oscillator.type = "sawtooth";
+    oscillator.frequency.setValueAtTime(
+      440,
+      audioContextRef.current.currentTime
+    );
+
+    // frequency modulation
+    oscillator.frequency.setValueAtTime(
+      440,
+      audioContextRef.current.currentTime
+    );
+    oscillator.frequency.linearRampToValueAtTime(
+      880,
+      audioContextRef.current.currentTime + 0.5
+    );
+    oscillator.frequency.linearRampToValueAtTime(
+      440,
+      audioContextRef.current.currentTime + 1
+    );
+
+    // volume adjustment
+    gainNodeRef.current.gain.setValueAtTime(
+      0.5,
+      audioContextRef.current.currentTime
+    );
+
+    oscillator.connect(gainNodeRef.current);
+    gainNodeRef.current.connect(audioContextRef.current.destination);
+
+    oscillator.start();
+    sourceNodeRef.current = oscillator; //OscillatorNode로 할당
+  };
+
+  // fire detected
+  useEffect(() => {
+    if (predictionData?.message === "fire detected") {
+      playAlertSound();
+
+      // 화면 전체 플래시 효과를 위한 요소
+      const flashOverlay = document.createElement("div");
+      flashOverlay.className =
+        "fixed inset-0 pointer-events-none animate-screenFlash";
+      document.body.appendChild(flashOverlay);
+
+      const alertElement = document.createElement("div");
+      alertElement.innerHTML = `
+        <div class="flex items-center gap-3">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2c0 6-8 7.5-8 14a8 8 0 0 0 16 0c0-6.5-8-8-8-14z"/>
+          </svg>
+          <div>
+            <div class="font-semibold mb-0.5">fire detected</div>
+            <div class="text-sm opacity-90">fire detected. please check immediately.</div>
+          </div>
+        </div>
+      `;
+
+      alertElement.className = `
+        fixed bottom-6 right-6 p-4
+        bg-red-500/90 text-white
+        rounded-xl
+        shadow-lg
+        backdrop-blur-md
+        max-w-[400px] z-[9999]
+        font-sans
+        animate-slideIn animate-pulse animate-flashBorder
+      `;
+
+      document.body.appendChild(alertElement);
+
+      const timeout = setTimeout(() => {
+        if (document.body.contains(alertElement)) {
+          alertElement.classList.remove("animate-slideIn");
+          alertElement.classList.add("animate-slideOut");
+          flashOverlay.remove();
+          setTimeout(() => {
+            document.body.removeChild(alertElement);
+          }, 500);
+        }
+      }, 10000);
+
+      return () => {
+        clearTimeout(timeout);
+        if (document.body.contains(alertElement)) {
+          document.body.removeChild(alertElement);
+        }
+        if (document.body.contains(flashOverlay)) {
+          flashOverlay.remove();
+        }
+      };
+    }
+  }, [predictionData]);
+
   // Turn on the webcam
   const startPredict = async () => {
     try {
+      const audioInitialized = await initAudioContext();
+      if (!audioInitialized) {
+        console.log("Audio context initialization failed");
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { deviceId: selectedDevice },
       });
@@ -124,6 +277,7 @@ export default function Home() {
 
   // Turn off the webcam
   const stopPredict = () => {
+    stopAlertSound();
     if (videoRef.current && videoRef.current.srcObject) {
       // 비디오요소가 존재하고, 웹캠이 실행중인지
       const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
